@@ -155,3 +155,23 @@ async def send_message(
         payload["text"] = "This message has been removed for violating our community guidelines."
         
     return {"success": True, "message": payload}
+
+from fastapi import Request, Form
+@router.post("/pusher/auth")
+async def pusher_auth(
+    request: Request,
+    socket_id: str = Form(...),
+    channel_name: str = Form(...),
+    current_user: User = Depends(get_current_user)
+):
+    if not pusher_client:
+        raise HTTPException(status_code=500, detail="Pusher not configured")
+        
+    if not current_user:
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    auth = pusher_client.authenticate(
+        channel=channel_name,
+        socket_id=socket_id
+    )
+    return auth
