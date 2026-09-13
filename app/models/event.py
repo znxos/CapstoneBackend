@@ -10,8 +10,8 @@ class EventParticipant(SQLModel, table=True):
     __table_args__ = (UniqueConstraint('eventId', 'userId', name='_event_user_uc'),)
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
-    eventId: str = Field(foreign_key="event.id", index=True)
-    userId: str = Field(foreign_key="user.id", index=True)
+    eventId: str = Field(foreign_key="Event.id", index=True)
+    userId: str = Field(foreign_key="User.id", index=True)
     joinedAt: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), sa_column=Column(DateTime(timezone=True), server_default=func.now()))
 
     # Relationships
@@ -31,7 +31,7 @@ class EventBase(SQLModel):
     cachedVectorEmbedding: List[float] = Field(default=[], sa_column=Column(ARRAY(Float)))
     status: str = Field(default="ACTIVE")
     
-    hostId: str = Field(foreign_key="user.id")
+    hostId: str = Field(foreign_key="User.id")
 
     createdAt: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), sa_column=Column(DateTime(timezone=True), server_default=func.now()))
     updatedAt: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), sa_column=Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now()))

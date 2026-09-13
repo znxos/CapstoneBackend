@@ -21,9 +21,9 @@ class UserResponse(BaseModel):
     isFirstTimeUni: Optional[bool]
     isInternationalStudent: Optional[bool]
     bio: Optional[str]
-    interests: List[str]
-    languages: List[str]
-    lookingForTags: List[str]
+    interests: Optional[List[str]] = []
+    languages: Optional[List[str]] = []
+    lookingForTags: Optional[List[str]] = []
     createdAt: datetime
 
 class Token(BaseModel):

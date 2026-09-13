@@ -9,7 +9,7 @@ engine = create_async_engine(
     DATABASE_URL, 
     echo=True, 
     future=True,
-    connect_args={"prepared_statement_cache_size": 0}
+    connect_args={"statement_cache_size": 0}
 )
 
 async_session = sessionmaker(

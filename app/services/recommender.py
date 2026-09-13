@@ -96,10 +96,10 @@ async def get_recommended_events(
             if user.yearOfStudy == event.host.yearOfStudy: score += 5
             if user.age and event.host.age and abs(user.age - event.host.age) <= 2: score += 5
             
-            shared_langs = set(user.languages) & set(event.host.languages)
+            shared_langs = set(user.languages or []) & set(event.host.languages or [])
             score += len(shared_langs) * 2
             
-            shared_interests = set(user.interests) & set(event.host.interests)
+            shared_interests = set(user.interests or []) & set(event.host.interests or [])
             score += len(shared_interests) * 2
             
             if user.socialEnergyLevel == event.host.socialEnergyLevel: score += 5
@@ -130,7 +130,7 @@ async def get_recommended_events(
     paginated_events = final_filtered[(page - 1) * limit : page * limit]
 
     # Layer 3: LLM Rationale
-    user_context = f"Age: {user.age}. Year of Study: {user.yearOfStudy}. University: {user.university}. Interests: {', '.join(user.interests)}. Languages: {', '.join(user.languages)}. Looking For: {', '.join(user.lookingForTags)}. Social Energy: {user.socialEnergyLevel} ({user.introvertExtrovertScore}/100). Bio: {user.bio}"
+    user_context = f"Age: {user.age}. Year of Study: {user.yearOfStudy}. University: {user.university}. Interests: {', '.join(user.interests or [])}. Languages: {', '.join(user.languages or [])}. Looking For: {', '.join(user.lookingForTags or [])}. Social Energy: {user.socialEnergyLevel} ({user.introvertExtrovertScore}/100). Bio: {user.bio}"
     user_profile_hash = hashlib.sha256(user_context.encode()).hexdigest()
     
     # Fetch existing rationales
@@ -147,7 +147,7 @@ async def get_recommended_events(
             event = item["event"]
             cached = rationale_map.get(event.id)
             if not cached or cached.userProfileHash != user_profile_hash:
-                host_details = f"Host Age: {event.host.age}. Host Year of Study: {event.host.yearOfStudy}. Host University: {event.host.university}. Host Interests: {', '.join(event.host.interests)}. Host Languages: {', '.join(event.host.languages)}. Host Energy: {event.host.socialEnergyLevel}. Host Bio: {event.host.bio}"
+                host_details = f"Host Age: {event.host.age}. Host Year of Study: {event.host.yearOfStudy}. Host University: {event.host.university}. Host Interests: {', '.join(event.host.interests or [])}. Host Languages: {', '.join(event.host.languages or [])}. Host Energy: {event.host.socialEnergyLevel}. Host Bio: {event.host.bio}"
                 cache_misses.append({
                     "eventId": event.id,
                     "eventContext": f"Title: {event.title}. Category: {event.category}. Description: {event.description}. [HOST PROFILE]: {host_details}"

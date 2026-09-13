@@ -22,7 +22,8 @@ if settings.NEXT_PUBLIC_PUSHER_APP_ID:
         key=settings.NEXT_PUBLIC_PUSHER_KEY,
         secret=settings.PUSHER_SECRET,
         cluster=settings.NEXT_PUBLIC_PUSHER_CLUSTER,
-        ssl=True
+        ssl=True,
+        encryption_master_key_base64=settings.PUSHER_ENCRYPTION_KEY
     )
 
 @router.get("/events", response_model=ChatEventsListResponse)

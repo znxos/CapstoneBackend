@@ -4,8 +4,8 @@ from sqlmodel import SQLModel, Field, Relationship
 from sqlalchemy import Column, DateTime, func, UniqueConstraint
 
 class EventRationaleBase(SQLModel):
-    eventId: str = Field(foreign_key="event.id", index=True)
-    userId: str = Field(foreign_key="user.id", index=True)
+    eventId: str = Field(foreign_key="Event.id", index=True)
+    userId: str = Field(foreign_key="User.id", index=True)
     rationale: str
     userProfileHash: str
     
