@@ -15,6 +15,7 @@ dependencies = [
     "google-generativeai>=0.8.6",
     "numpy>=2.5.3",
     "passlib[bcrypt]>=1.7.4",
+    "pusher>=3.3.4",
     "pydantic-settings>=2.15.0",
     "python-jose[cryptography]>=3.5.0",
     "slowapi>=0.1.10",
