@@ -15,8 +15,8 @@ from app.api.routers import auth, recommend, chat
 # Configure CORS for the frontend
 app.add_middleware(
     CORSMiddleware,
-    # In production, replace "*" with your actual frontend URL (e.g., https://my-frontend.vercel.app)
-    allow_origins=["*"], 
+    # Use regex to allow all origins dynamically so that credentials work
+    allow_origin_regex=".*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
