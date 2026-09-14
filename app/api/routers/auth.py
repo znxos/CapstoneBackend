@@ -212,8 +212,8 @@ async def reset_password_request(req: PasswordResetRequest, request: Request, db
         
     token = create_password_reset_token(email=req.email)
     
-    # Use the origin or x-forwarded-host headers to support Vercel preview deployments dynamically!
-    origin = request.headers.get("origin")
+    # Use the x-frontend-url, origin or x-forwarded-host headers to support Vercel preview deployments dynamically!
+    origin = request.headers.get("x-frontend-url") or request.headers.get("origin")
     if not origin:
         forwarded_host = request.headers.get("x-forwarded-host") or request.headers.get("host")
         proto = request.headers.get("x-forwarded-proto", "https")
