@@ -212,7 +212,10 @@ async def reset_password_request(req: PasswordResetRequest, request: Request, db
         
     token = create_password_reset_token(email=req.email)
     
-    origin = settings.FRONTEND_URL
+    # Use the origin header to support Vercel preview deployments dynamically.
+    # Fallback to the environment variable if the origin header is missing.
+    origin = request.headers.get("origin") or settings.FRONTEND_URL
+
     reset_link = f"{origin}/reset-password?token={token}"
     
     if settings.RESEND_API_KEY:
