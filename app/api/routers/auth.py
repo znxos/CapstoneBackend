@@ -202,7 +202,7 @@ class PasswordResetConfirm(BaseModel):
     new_password: str
 
 @router.post("/reset-password-request")
-async def reset_password_request(req: PasswordResetRequest, db: AsyncSession = Depends(get_db)):
+async def reset_password_request(req: PasswordResetRequest, request: Request, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.studentEmail == req.email))
     user = result.scalars().first()
     
@@ -211,7 +211,17 @@ async def reset_password_request(req: PasswordResetRequest, db: AsyncSession = D
         return {"message": "If an account with that email exists, we have sent a reset link."}
         
     token = create_password_reset_token(email=req.email)
-    reset_link = f"{settings.FRONTEND_URL}/reset-password?token={token}"
+    
+    # Use the origin or x-forwarded-host headers to support Vercel preview deployments dynamically!
+    origin = request.headers.get("origin")
+    if not origin:
+        forwarded_host = request.headers.get("x-forwarded-host") or request.headers.get("host")
+        proto = request.headers.get("x-forwarded-proto", "https")
+        if forwarded_host:
+            origin = f"{proto}://{forwarded_host}"
+            
+    origin = origin or settings.FRONTEND_URL
+    reset_link = f"{origin}/reset-password?token={token}"
     
     if settings.RESEND_API_KEY:
         async with httpx.AsyncClient() as client:
