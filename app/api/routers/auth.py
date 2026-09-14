@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 from fastapi.security import OAuth2PasswordRequestForm
@@ -19,7 +19,7 @@ from app.core.config import settings
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 @router.post("/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def signup(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
+async def signup(user_data: UserCreate, request: Request, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.studentEmail == user_data.studentEmail))
     if result.scalars().first():
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -46,7 +46,8 @@ async def signup(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
     
     # Send email
     if settings.RESEND_API_KEY:
-        confirm_link = f"http://localhost:8000/api/auth/verify?token={token_str}"
+        base_url = str(request.base_url).rstrip('/')
+        confirm_link = f"{base_url}/api/auth/verify?token={token_str}"
         async with httpx.AsyncClient() as client:
             await client.post(
                 "https://api.resend.com/emails",
@@ -98,13 +99,13 @@ async def verify_email(token: str, db: AsyncSession = Depends(get_db)):
     await db.delete(v_token)
     await db.commit()
     
-    return RedirectResponse(url="http://localhost:3000/login?verified=true")
+    return RedirectResponse(url=f"{settings.FRONTEND_URL}/login?verified=true")
 
 class ResendVerificationRequest(BaseModel):
     email: EmailStr
 
 @router.post("/resend-verification")
-async def resend_verification(req: ResendVerificationRequest, db: AsyncSession = Depends(get_db)):
+async def resend_verification(req: ResendVerificationRequest, request: Request, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.studentEmail == req.email))
     user = result.scalars().first()
     
@@ -124,7 +125,8 @@ async def resend_verification(req: ResendVerificationRequest, db: AsyncSession =
     await db.commit()
     
     if settings.RESEND_API_KEY:
-        confirm_link = f"http://localhost:8000/api/auth/verify?token={token_str}"
+        base_url = str(request.base_url).rstrip('/')
+        confirm_link = f"{base_url}/api/auth/verify?token={token_str}"
         async with httpx.AsyncClient() as client:
             await client.post(
                 "https://api.resend.com/emails",
@@ -209,7 +211,7 @@ async def reset_password_request(req: PasswordResetRequest, db: AsyncSession = D
         return {"message": "If an account with that email exists, we have sent a reset link."}
         
     token = create_password_reset_token(email=req.email)
-    reset_link = f"http://localhost:3000/reset-password?token={token}"
+    reset_link = f"{settings.FRONTEND_URL}/reset-password?token={token}"
     
     if settings.RESEND_API_KEY:
         async with httpx.AsyncClient() as client:

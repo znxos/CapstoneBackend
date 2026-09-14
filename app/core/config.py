@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     PUSHER_SECRET: str | None = None
     NEXT_PUBLIC_PUSHER_CLUSTER: str | None = None
     PUSHER_ENCRYPTION_KEY: str | None = None
+    
+    FRONTEND_URL: str = "http://localhost:3000"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
     
