@@ -4,7 +4,19 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from app.core.rate_limit import limiter
 
-app = FastAPI(title="Capstone API")
+from contextlib import asynccontextmanager
+import asyncio
+from app.services.moderation import process_moderation_queue
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: spawn moderation worker
+    task = asyncio.create_task(process_moderation_queue())
+    yield
+    # Shutdown
+    task.cancel()
+
+app = FastAPI(title="Capstone API", lifespan=lifespan)
 
 # Add rate limiter
 app.state.limiter = limiter

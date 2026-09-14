@@ -20,10 +20,14 @@ class UserResponse(BaseModel):
     yearOfStudy: Optional[int]
     isFirstTimeUni: Optional[bool]
     isInternationalStudent: Optional[bool]
+    isFirstLogin: bool
     bio: Optional[str]
+    introvertExtrovertScore: Optional[int] = None
+    socialEnergyLevel: Optional[str] = None
     interests: Optional[List[str]] = []
     languages: Optional[List[str]] = []
     lookingForTags: Optional[List[str]] = []
+    extractedAiTags: Optional[List[str]] = []
     createdAt: datetime
 
 class Token(BaseModel):

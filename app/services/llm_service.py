@@ -5,6 +5,7 @@ import asyncio
 from typing import List, Dict, Any
 import google.generativeai as genai
 from app.core.config import settings
+from app.core.limiter import events_limiter
 
 RECOMMENDATION_MODELS = [
     "gemini-3-flash",
@@ -30,6 +31,10 @@ def compute_cosine_similarity(vec_a: List[float], vec_b: List[float]) -> float:
     return dot_product / (norm_a * norm_b)
 
 async def generate_user_embedding(user_data: Dict[str, Any]) -> List[float]:
+    if not events_limiter.can_request():
+        print("Events limiter rate limited (user embedding).")
+        return []
+        
     api_keys = [k.strip() for k in (settings.GEMINI_API_KEY or "").split(",") if k.strip()]
     if not api_keys:
         return []
@@ -49,6 +54,10 @@ async def generate_user_embedding(user_data: Dict[str, Any]) -> List[float]:
         return []
 
 async def generate_event_embedding(event_data: Dict[str, Any]) -> List[float]:
+    if not events_limiter.can_request():
+        print("Events limiter rate limited (event embedding).")
+        return []
+        
     api_keys = [k.strip() for k in (settings.GEMINI_API_KEY or "").split(",") if k.strip()]
     if not api_keys:
         return []
@@ -91,6 +100,10 @@ Events: {events_json_str}
         attempt_index = random.randint(0, total_combinations - 1)
 
         for _ in range(total_combinations):
+            if not events_limiter.can_request():
+                print("Events limiter rate limited (rationale retry loop).")
+                break
+                
             model_index = attempt_index % len(RECOMMENDATION_MODELS)
             key_index = (attempt_index // len(RECOMMENDATION_MODELS)) % len(api_keys)
             
@@ -124,3 +137,65 @@ Events: {events_json_str}
     except asyncio.TimeoutError:
         print("Gemini batch rationale generation timed out.")
         return {}
+
+async def extract_tags_from_bio(bio: str, max_attempts: int = 5) -> List[str]:
+    if not bio or len(bio) < 10:
+        return []
+        
+    api_keys = [k.strip() for k in (settings.GEMINI_API_KEY or "").split(",") if k.strip()]
+    if not api_keys:
+        print("No valid GEMINI_API_KEY found.")
+        return []
+        
+    prompt = f"""
+    Analyze the following user bio and extract up to 5 succinct hobby or interest tags.
+    The tags should be single words or short phrases (max 2 words each).
+    Format the output as a valid JSON array of strings in all UPPERCASE.
+    Do not include markdown blocks or any other text in your response, just the raw JSON array.
+    
+    Bio: "{bio}"
+    """
+    
+    total_combinations = len(RECOMMENDATION_MODELS) * len(api_keys)
+    attempt_index = random.randint(0, max(0, total_combinations - 1))
+    
+    for i in range(max_attempts):
+        if not events_limiter.can_request():
+            print("Events limiter rate limited (tag extraction retry loop).")
+            break
+            
+        model_index = attempt_index % len(RECOMMENDATION_MODELS)
+        key_index = (attempt_index // len(RECOMMENDATION_MODELS)) % len(api_keys)
+        
+        try:
+            genai.configure(api_key=api_keys[key_index])
+            model = genai.GenerativeModel(RECOMMENDATION_MODELS[model_index])
+            
+            result = await asyncio.to_thread(
+                model.generate_content,
+                prompt,
+                generation_config={"response_mime_type": "application/json"}
+            )
+            text = result.text.strip()
+            
+            try:
+                tags = json.loads(text)
+            except Exception:
+                if "```json" in text:
+                    text = text.split("```json")[1].split("```")[0].strip()
+                    tags = json.loads(text)
+                else:
+                    raise Exception("Failed to parse JSON")
+                    
+            if isinstance(tags, list):
+                return [str(t).upper() for t in tags[:5]]
+                
+        except Exception as e:
+            print(f"[Attempt {i + 1}/{max_attempts}] Model {RECOMMENDATION_MODELS[model_index]} failed: {e}")
+            
+        attempt_index = (attempt_index + 1) % total_combinations
+        await asyncio.sleep(0.5)
+        
+    print("AI Tag Extraction completely failed after max attempts")
+    return []
+

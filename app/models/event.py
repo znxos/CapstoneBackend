@@ -1,5 +1,10 @@
 import uuid
-from typing import List, Optional
+from typing import List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.models.user import User
+    from app.models.message import Message
+    from app.models.rationale import EventRationale
 from datetime import datetime, timezone
 from sqlmodel import SQLModel, Field, Relationship
 from sqlalchemy import Column, Float, DateTime, func, UniqueConstraint

@@ -11,7 +11,7 @@ from app.models.event import Event, EventParticipant
 from app.models.message import Message
 from app.schemas.chat import MessageCreate, MessageResponse, ChatEventsListResponse
 from app.core.config import settings
-from app.services.moderation import execute_moderation
+# from app.services.moderation import execute_moderation
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -141,20 +141,13 @@ async def send_message(
             print("Pusher error:", e)
             
     # Moderation (async in background)
-    is_flagged = await execute_moderation(msg.text)
-    if is_flagged:
-        message.isFlagged = True
-        await db.commit()
-        if pusher_client:
-            try:
-                pusher_client.trigger(f"private-encrypted-{event_id}", "message-flagged", {
-                    "messageId": message.id,
-                    "text": "This message has been removed for violating our community guidelines."
-                })
-            except Exception:
-                pass
-        payload["text"] = "This message has been removed for violating our community guidelines."
-        
+    from app.services.moderation import moderation_queue
+    moderation_queue.put_nowait({
+        "messageId": message.id,
+        "eventId": event_id,
+        "text": msg.text
+    })
+    
     return {"success": True, "message": payload}
 
 from fastapi import Request, Form

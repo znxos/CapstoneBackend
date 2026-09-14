@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel
 
 class UserOnboard(BaseModel):
@@ -11,5 +11,5 @@ class UserOnboard(BaseModel):
     socialEnergyLevel: str
     lookingForTags: List[str]
     bio: str
-    extractedAiTags: List[str]
+    extractedAiTags: Optional[List[str]] = []
     isInternationalStudent: bool
