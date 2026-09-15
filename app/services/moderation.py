@@ -42,7 +42,7 @@ async def execute_batch_moderation_with_fallback(batch: List[Dict[str, Any]], ma
         return []
 
     prompt = f"""
-    Analyze the following batch of chat messages for harassment, hate speech, severe bullying, or explicit danger.
+    Analyze the following batch of chat messages for harassment, hate speech, severe bullying, explicit danger, profanity, or highly abusive language.
     Respond with a JSON array containing the messageIds of ONLY the messages that are FLAGGED. If none are flagged, return an empty array [].
     Output ONLY valid JSON.
     Messages to check:
