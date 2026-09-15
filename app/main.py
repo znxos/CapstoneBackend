@@ -51,7 +51,7 @@ app.include_router(chat.router, dependencies=[Depends(verify_api_key)])
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi import HTTPException, status
 import secrets
-from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 from fastapi.openapi.utils import get_openapi
 from app.core.config import settings
 
@@ -75,6 +75,10 @@ def get_current_username(credentials: HTTPBasicCredentials = Depends(security)):
 @app.get("/docs", include_in_schema=False)
 async def get_documentation(username: str = Depends(get_current_username)):
     return get_swagger_ui_html(openapi_url="/openapi.json", title="docs")
+
+@app.get("/redoc", include_in_schema=False)
+async def get_redoc_documentation(username: str = Depends(get_current_username)):
+    return get_redoc_html(openapi_url="/openapi.json", title="redoc")
 
 @app.get("/openapi.json", include_in_schema=False)
 async def openapi(username: str = Depends(get_current_username)):
