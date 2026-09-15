@@ -54,6 +54,7 @@ async def execute_batch_moderation_with_fallback(batch: List[Dict[str, Any]], ma
     
     async def fetch():
         nonlocal attempt_index
+        last_error = None
         for i in range(max_attempts):
             if not chat_limiter.can_request():
                 print("Chat moderation rate limited. Failing open for batch.")
@@ -100,13 +101,14 @@ async def execute_batch_moderation_with_fallback(batch: List[Dict[str, Any]], ma
                         flagged_ids = [str(x) for x in arrays[0]]
                 return flagged_ids
             except Exception as e:
-                if "429" in str(e):
-                    # Bubble up 429 to re-queue the batch
-                    raise e
                 print(f"Moderation failed on attempt {i+1} with {MODERATION_MODELS[model_index]}: {e}")
+                last_error = e
                 
             attempt_index = (attempt_index + 1) % total_combinations
             await asyncio.sleep(0.5)
+            
+        if last_error and "429" in str(last_error):
+            raise last_error
             
         return []
             
