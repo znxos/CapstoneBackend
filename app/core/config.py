@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     PUSHER_ENCRYPTION_KEY: str | None = None
     
     FRONTEND_URL: str = "http://localhost:3000"
+    
+    API_SECRET_KEY: str | None = None
+    DOCS_USERNAME: str | None = None
+    DOCS_PASSWORD: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
     

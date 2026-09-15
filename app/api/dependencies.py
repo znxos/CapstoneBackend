@@ -35,3 +35,15 @@ async def get_current_user(
     if user is None:
         raise credentials_exception
     return user
+
+from fastapi import Header
+
+async def verify_api_key(x_api_key: str = Header(None)):
+    if not settings.API_SECRET_KEY:
+        # If no key is configured in the environment, skip the check (useful for local dev)
+        return
+    if x_api_key != settings.API_SECRET_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid or missing X-API-Key header",
+        )
