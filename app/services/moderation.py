@@ -14,10 +14,7 @@ from app.db.session import async_session
 from app.models.message import Message
 
 MODERATION_MODELS = [
-    "gemini-3-flash",
-    "gemini-3.1-flash-lite",
     "gemini-3.5-flash",
-    "gemini-3.5-flash-lite",
     "gemini-3.6-flash",
     "gemini-3.7-flash",
     "gemini-3.8-flash"
@@ -42,7 +39,7 @@ async def execute_batch_moderation_with_fallback(batch: List[Dict[str, Any]], ma
         return []
 
     prompt = f"""
-    Analyze the following batch of chat messages for harassment, hate speech, severe bullying, explicit danger, profanity, or highly abusive language.
+    Analyze the following batch of chat messages for harassment, hate speech, severe bullying, or explicit danger.
     Respond with a JSON array containing the messageIds of ONLY the messages that are FLAGGED. If none are flagged, return an empty array [].
     Output ONLY valid JSON.
     Messages to check:
@@ -113,10 +110,10 @@ async def execute_batch_moderation_with_fallback(batch: List[Dict[str, Any]], ma
         return []
             
     try:
-        return await asyncio.wait_for(fetch(), timeout=15.0)
+        return await asyncio.wait_for(fetch(), timeout=45.0)
     except asyncio.TimeoutError:
         print("Moderation batch fetch timed out.")
-        return []
+        raise Exception("Timeout")
 
 async def process_moderation_queue():
     while True:
@@ -171,7 +168,12 @@ async def process_moderation_queue():
                                     
         except Exception as e:
             if "429" in str(e):
-                print("Background Moderation hit 429. Re-queueing batch.")
+                print("Background Moderation hit 429. Re-queueing batch and backing off.")
+                for item in reversed(batch):
+                    moderation_queue.put_nowait(item)
+                await asyncio.sleep(60)
+            elif "Timeout" in str(e):
+                print("Background Moderation timed out. Re-queueing batch.")
                 for item in reversed(batch):
                     moderation_queue.put_nowait(item)
             else:
