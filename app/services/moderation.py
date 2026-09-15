@@ -73,14 +73,23 @@ async def execute_batch_moderation_with_fallback(batch: List[Dict[str, Any]], ma
                 )
                 text = result.text.strip()
                 try:
-                    parsed = json.loads(text)
+                    clean_text = text.strip()
+                    if clean_text.startswith('```'):
+                        clean_text = clean_text.strip('`').strip()
+                        if clean_text.startswith('json'):
+                            clean_text = clean_text[4:].strip()
+                    parsed = json.loads(clean_text)
                 except Exception:
-                    # fallback extraction
-                    if "```json" in text:
-                        text = text.split("```json")[1].split("```")[0].strip()
-                        parsed = json.loads(text)
+                    # fallback extraction: find the first and last brackets
+                    start = text.find('[')
+                    end = text.rfind(']')
+                    if start != -1 and end != -1 and end > start:
+                        try:
+                            parsed = json.loads(text[start:end+1])
+                        except Exception:
+                            raise Exception(f"Failed to parse JSON array. Content: {text[:100]}...")
                     else:
-                        raise Exception("Failed to parse JSON")
+                        raise Exception(f"Failed to parse JSON. Content: {text[:100]}...")
                 
                 flagged_ids = []
                 if isinstance(parsed, list):
