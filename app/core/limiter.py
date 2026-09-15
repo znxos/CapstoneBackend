@@ -1,5 +1,5 @@
 import time
-from typing import List
+from typing import Dict, List
 
 class AILimiter:
     """
@@ -8,17 +8,20 @@ class AILimiter:
     def __init__(self, limit: int, time_window_seconds: int = 60):
         self.limit = limit
         self.time_window_seconds = time_window_seconds
-        self.timestamps: List[float] = []
+        self.timestamps: Dict[str, List[float]] = {}
         
-    def can_request(self) -> bool:
+    def can_request(self, identifier: str = "default") -> bool:
         now = time.time()
+        if identifier not in self.timestamps:
+            self.timestamps[identifier] = []
+            
         # Keep only timestamps within the time window
-        self.timestamps = [t for t in self.timestamps if now - t < self.time_window_seconds]
+        self.timestamps[identifier] = [t for t in self.timestamps[identifier] if now - t < self.time_window_seconds]
         
-        if len(self.timestamps) >= self.limit:
+        if len(self.timestamps[identifier]) >= self.limit:
             return False
             
-        self.timestamps.append(now)
+        self.timestamps[identifier].append(now)
         return True
 
 # Export singleton instances

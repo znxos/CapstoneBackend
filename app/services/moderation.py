@@ -50,21 +50,28 @@ async def execute_batch_moderation_with_fallback(batch: List[Dict[str, Any]], ma
     """
     
     total_combinations = len(MODERATION_MODELS) * len(api_keys)
+    actual_max_attempts = max(max_attempts, total_combinations)
     attempt_index = random.randint(0, max(0, total_combinations - 1))
     
     async def fetch():
         nonlocal attempt_index
         last_error = None
-        for i in range(max_attempts):
-            if not chat_limiter.can_request():
-                print("Chat moderation rate limited. Failing open for batch.")
-                return []
-                
+        for i in range(actual_max_attempts):
             model_index = attempt_index % len(MODERATION_MODELS)
             key_index = (attempt_index // len(MODERATION_MODELS)) % len(api_keys)
             
-            genai.configure(api_key=api_keys[key_index])
-            model = genai.GenerativeModel(MODERATION_MODELS[model_index])
+            model_name = MODERATION_MODELS[model_index]
+            api_key = api_keys[key_index]
+            identifier = f"{api_key}-{model_name}"
+            
+            if not chat_limiter.can_request(identifier):
+                print(f"Local rate limit hit for {model_name} on key index {key_index}. Trying next...")
+                last_error = Exception(f"429 Local limit hit for {model_name}")
+                attempt_index = (attempt_index + 1) % total_combinations
+                continue
+                
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel(model_name)
             
             try:
                 result = await asyncio.to_thread(
@@ -124,9 +131,8 @@ async def process_moderation_queue():
         if moderation_queue.empty():
             continue
             
-        # Check rate limit before taking from queue
-        if not chat_limiter.can_request():
-            continue
+        # We no longer check the global rate limit here,
+        # we check per-model and per-key inside fetch() instead.
             
         batch_size = 20
         batch = []
