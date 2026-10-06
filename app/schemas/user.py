@@ -1,10 +1,19 @@
 from typing import List, Optional
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 from datetime import datetime
 
 class UserCreate(BaseModel):
     studentEmail: EmailStr
     password: str
+
+    @field_validator('studentEmail')
+    @classmethod
+    def validate_ac_za(cls, v):
+        valid_domains = ["mycput.ac.za", "myuct.ac.za", "myuwc.ac.za", "student.sun.ac.za"]
+        domain = str(v).split('@')[-1].lower()
+        if domain not in valid_domains:
+            raise ValueError('Email must belong to one of the stipulated universities (CPUT, UCT, UWC, SU)')
+        return v
 
 class UserLogin(BaseModel):
     studentEmail: EmailStr
