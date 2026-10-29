@@ -8,8 +8,8 @@ from app.core.config import settings
 from app.core.limiter import events_limiter
 
 RECOMMENDATION_MODELS = [
-    "gemini-3-flash",
-    "gemini-3.1-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
     "gemini-3.5-flash",
     "gemini-3.5-flash-lite",
     "gemini-3.6-flash",
@@ -44,7 +44,7 @@ async def generate_user_embedding(user_data: Dict[str, Any]) -> List[float]:
     try:
         genai.configure(api_key=random.choice(api_keys))
         result = genai.embed_content(
-            model="models/text-embedding-004",
+            model="models/gemini-embedding-001",
             content=text_to_embed,
             task_type="retrieval_document"
         )
@@ -67,7 +67,7 @@ async def generate_event_embedding(event_data: Dict[str, Any]) -> List[float]:
     try:
         genai.configure(api_key=random.choice(api_keys))
         result = genai.embed_content(
-            model="models/text-embedding-004",
+            model="models/gemini-embedding-001",
             content=text_to_embed,
             task_type="retrieval_document"
         )
@@ -133,9 +133,9 @@ Events: {events_json_str}
         return {}
 
     try:
-        return await asyncio.wait_for(fetch_with_retries(), timeout=60.0)
+        return await asyncio.wait_for(fetch_with_retries(), timeout=45.0)
     except asyncio.TimeoutError:
-        print("Gemini batch rationale generation timed out.")
+        print("Gemini batch rationale generation timed out after 45s.")
         return {}
 
 async def extract_tags_from_bio(bio: str, max_attempts: int = 5) -> List[str]:

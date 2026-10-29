@@ -42,3 +42,13 @@ class UserResponse(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str
+
+class UserProfileUpdate(BaseModel):
+    displayName: Optional[str] = None
+    bio: Optional[str] = None
+    languages: Optional[List[str]] = None
+    introvertExtrovertScore: Optional[int] = None
+    socialEnergyLevel: Optional[str] = None
+    interests: Optional[List[str]] = None
+    extractedAiTags: Optional[List[str]] = None
+

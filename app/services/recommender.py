@@ -226,3 +226,81 @@ async def get_recommended_events(
         })
 
     return {"events": final_events, "totalCount": total_count}
+
+async def pregenerate_user_rationales(db: AsyncSession, user: User, limit: int = 6) -> int:
+    """
+    Pre-generates and caches 1-sentence Gemini match rationales for candidate events
+    during profile save or onboarding, so loading /events is instant.
+    """
+    user_context = f"Age: {user.age}. Year of Study: {user.yearOfStudy}. University: {user.university}. Interests: {', '.join(user.interests or [])}. Languages: {', '.join(user.languages or [])}. Looking For: {', '.join(user.lookingForTags or [])}. Social Energy: {user.socialEnergyLevel} ({user.introvertExtrovertScore}/100). Bio: {user.bio}"
+    user_profile_hash = hashlib.sha256(user_context.encode()).hexdigest()
+
+    result = await db.execute(
+        select(Event)
+        .options(selectinload(Event.host), selectinload(Event.participants))
+        .where(Event.status == "ACTIVE")
+        .order_by(Event.startTime)
+    )
+    events = result.scalars().all()
+
+    joined_events_result = await db.execute(
+        select(EventParticipant.eventId).where(EventParticipant.userId == user.id)
+    )
+    joined_event_ids = set(joined_events_result.scalars().all())
+
+    user_is_first_year = user.age and user.age <= 19 and user.yearOfStudy == 1
+    candidate_events = []
+    for event in events:
+        if event.id in joined_event_ids or event.hostId == user.id:
+            continue
+        if user.university and event.host.university and user.university != event.host.university:
+            continue
+        host_is_first_year = event.host.age and event.host.age <= 19 and event.host.yearOfStudy == 1
+        if user_is_first_year and not host_is_first_year:
+            continue
+        if not user_is_first_year and host_is_first_year:
+            continue
+        candidate_events.append(event)
+        if len(candidate_events) >= limit:
+            break
+
+    if not candidate_events:
+        return 0
+
+    event_ids = [e.id for e in candidate_events]
+    rationales_result = await db.execute(
+        select(EventRationale).where(EventRationale.userId == user.id, EventRationale.eventId.in_(event_ids))
+    )
+    rationale_map = {r.eventId: r for r in rationales_result.scalars().all()}
+
+    cache_misses = []
+    for event in candidate_events:
+        cached = rationale_map.get(event.id)
+        if not cached or cached.userProfileHash != user_profile_hash:
+            host_details = f"Host Age: {event.host.age}. Host Year of Study: {event.host.yearOfStudy}. Host University: {event.host.university}. Host Interests: {', '.join(event.host.interests or [])}. Host Languages: {', '.join(event.host.languages or [])}. Host Energy: {event.host.socialEnergyLevel}. Host Bio: {event.host.bio}"
+            cache_misses.append({
+                "eventId": event.id,
+                "eventContext": f"Title: {event.title}. Category: {event.category}. Description: {event.description}. [HOST PROFILE]: {host_details}"
+            })
+
+    if not cache_misses:
+        return 0
+
+    batch_results = await generate_batch_rationales(user_context, cache_misses)
+    count = 0
+    for e_id, rationale_text in batch_results.items():
+        existing = rationale_map.get(e_id)
+        if existing:
+            existing.rationale = rationale_text
+            existing.userProfileHash = user_profile_hash
+        else:
+            new_rat = EventRationale(
+                eventId=e_id, userId=user.id, rationale=rationale_text, userProfileHash=user_profile_hash
+            )
+            db.add(new_rat)
+            rationale_map[e_id] = new_rat
+        count += 1
+
+    await db.commit()
+    return count
+

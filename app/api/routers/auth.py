@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 from fastapi.security import OAuth2PasswordRequestForm
@@ -7,16 +7,29 @@ import uuid
 from datetime import datetime, timezone, timedelta
 
 from app.api.dependencies import get_db, get_current_user
+from app.db.session import async_session
 from app.models.user import User
 from app.models.token import VerificationToken
-from app.schemas.user import UserCreate, UserResponse, Token
+from app.schemas.user import UserCreate, UserResponse, Token, UserProfileUpdate
 from app.core.security import get_password_hash, verify_password, create_access_token, create_password_reset_token, verify_password_reset_token
-from app.services.llm_service import extract_tags_from_bio
+from app.services.llm_service import extract_tags_from_bio, generate_user_embedding
+from app.services.recommender import pregenerate_user_rationales
 from pydantic import BaseModel, EmailStr
 import httpx
 from app.core.config import settings
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+async def _bg_pregenerate_user_rationales(user_id: str):
+    try:
+        async with async_session() as session:
+            result = await session.execute(select(User).where(User.id == user_id))
+            user = result.scalars().first()
+            if user:
+                await pregenerate_user_rationales(session, user)
+    except Exception as e:
+        print(f"Error in background rationale pregeneration for user {user_id}: {e}")
+
 
 @router.post("/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def signup(user_data: UserCreate, request: Request, db: AsyncSession = Depends(get_db)):
@@ -167,6 +180,7 @@ from app.schemas.onboard import UserOnboard
 @router.post("/onboard")
 async def onboard_user(
     data: UserOnboard,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -179,20 +193,107 @@ async def onboard_user(
     current_user.introvertExtrovertScore = data.introvertExtrovertScore
     current_user.socialEnergyLevel = data.socialEnergyLevel
     current_user.lookingForTags = data.lookingForTags
+    current_user.interests = data.lookingForTags
     current_user.bio = data.bio
     current_user.isInternationalStudent = data.isInternationalStudent
     current_user.isFirstLogin = False
     
-    if data.bio and len(data.bio) >= 10:
-        extracted_tags = await extract_tags_from_bio(data.bio)
-        current_user.extractedAiTags = extracted_tags
-    elif data.extractedAiTags:
+    if data.extractedAiTags:
         current_user.extractedAiTags = data.extractedAiTags
+    elif data.bio and len(data.bio) >= 10:
+        try:
+            extracted_tags = await extract_tags_from_bio(data.bio)
+            current_user.extractedAiTags = extracted_tags
+        except Exception as e:
+            print(f"Error extracting tags in onboarding: {e}")
     
+    try:
+        new_embedding = await generate_user_embedding({
+            "bio": current_user.bio,
+            "interests": current_user.interests,
+            "lookingForTags": current_user.lookingForTags,
+            "languages": current_user.languages
+        })
+        if new_embedding:
+            current_user.cachedVectorEmbedding = new_embedding
+    except Exception as e:
+        print(f"Error generating initial user vector embedding: {e}")
+
     db.add(current_user)
     await db.commit()
+
+    background_tasks.add_task(_bg_pregenerate_user_rationales, current_user.id)
     
     return {"success": True}
+
+@router.patch("/profile", response_model=UserResponse)
+async def update_profile(
+    data: UserProfileUpdate,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    # Detect what actually changed before updating fields
+    bio_changed = (data.bio is not None and data.bio.strip() != (current_user.bio or "").strip())
+    interests_changed = (data.interests is not None and set(data.interests) != set(current_user.interests or []))
+    languages_changed = (data.languages is not None and set(data.languages) != set(current_user.languages or []))
+    energy_changed = (data.socialEnergyLevel is not None and data.socialEnergyLevel != current_user.socialEnergyLevel)
+    score_changed = (data.introvertExtrovertScore is not None and data.introvertExtrovertScore != current_user.introvertExtrovertScore)
+
+    rec_fields_changed = bio_changed or interests_changed or languages_changed or energy_changed or score_changed
+
+    if data.displayName is not None:
+        current_user.displayName = data.displayName
+    if data.languages is not None:
+        current_user.languages = data.languages
+    if data.introvertExtrovertScore is not None:
+        current_user.introvertExtrovertScore = data.introvertExtrovertScore
+    if data.socialEnergyLevel is not None:
+        current_user.socialEnergyLevel = data.socialEnergyLevel
+    if data.interests is not None:
+        current_user.interests = data.interests
+        current_user.lookingForTags = data.interests
+    if data.bio is not None:
+        current_user.bio = data.bio
+
+    # AI Tag Extraction: use client-provided tags if available, else extract if bio changed
+    if data.extractedAiTags is not None:
+        current_user.extractedAiTags = data.extractedAiTags
+    elif bio_changed and data.bio and len(data.bio.strip()) >= 10:
+        try:
+            extracted_tags = await extract_tags_from_bio(data.bio.strip())
+            if extracted_tags:
+                current_user.extractedAiTags = extracted_tags
+        except Exception as e:
+            print(f"Error extracting tags from bio: {e}")
+
+    # Vector Embedding: ONLY re-generate if semantic matching fields (bio, interests, languages) changed
+    if bio_changed or interests_changed or languages_changed:
+        try:
+            new_embedding = await generate_user_embedding({
+                "bio": current_user.bio,
+                "interests": current_user.interests,
+                "lookingForTags": current_user.lookingForTags,
+                "languages": current_user.languages
+            })
+            if new_embedding:
+                current_user.cachedVectorEmbedding = new_embedding
+            else:
+                current_user.cachedVectorEmbedding = []
+        except Exception as e:
+            print(f"Error updating user vector embedding: {e}")
+            current_user.cachedVectorEmbedding = []
+
+    db.add(current_user)
+    await db.commit()
+    await db.refresh(current_user)
+
+    # Pre-generate rationales in the background: ONLY if recommendation-driving fields changed
+    if rec_fields_changed:
+        background_tasks.add_task(_bg_pregenerate_user_rationales, current_user.id)
+
+    return current_user
+
 
 class PasswordResetRequest(BaseModel):
     email: EmailStr
