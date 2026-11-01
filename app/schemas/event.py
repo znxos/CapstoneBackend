@@ -25,6 +25,7 @@ class EventResponse(BaseModel):
     participants: List[str] = []
     isJoined: bool = False
     isHost: bool = False
+    isEnded: bool = False
 
 class EventListResponse(BaseModel):
     events: List[EventResponse]

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 from app.api.dependencies import get_db, get_current_user
 from app.models.user import User
@@ -49,9 +49,24 @@ async def create_event(
         "description": event_data.description
     })
     
-    # Needs timezone handling in production, but for now parse naive
-    start = datetime.fromisoformat(event_data.startTime.replace("Z", "+00:00"))
-    end = datetime.fromisoformat(event_data.endTime.replace("Z", "+00:00"))
+    try:
+        start = datetime.fromisoformat(event_data.startTime.replace("Z", "+00:00"))
+        end = datetime.fromisoformat(event_data.endTime.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid date or time format.")
+
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=timezone.utc)
+
+    now = datetime.now(timezone.utc)
+    if end <= start:
+        raise HTTPException(status_code=400, detail="Event end date and time must be after the start date and time.")
+    if end <= now:
+        raise HTTPException(status_code=400, detail="Event end date and time cannot be in the past.")
+    if start < now - timedelta(minutes=15):
+        raise HTTPException(status_code=400, detail="Event start date and time cannot be in the past.")
     
     new_event = Event(
         title=event_data.title,
@@ -92,6 +107,12 @@ async def join_event(
     
     if participant_count >= event.maxParticipants:
         raise HTTPException(status_code=409, detail="Event Capacity Reached")
+        
+    # Check if event has ended
+    now = datetime.now(timezone.utc)
+    event_end = event.endTime if (event.endTime and event.endTime.tzinfo) else (event.endTime.replace(tzinfo=timezone.utc) if event.endTime else None)
+    if event_end and event_end <= now:
+        raise HTTPException(status_code=400, detail="Cannot join an event that has already ended")
         
     # check if already joined
     existing = await db.execute(select(EventParticipant).where(EventParticipant.eventId == event_id, EventParticipant.userId == current_user.id))

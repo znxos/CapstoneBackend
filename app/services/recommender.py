@@ -1,4 +1,5 @@
 import hashlib
+from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select, func
@@ -48,10 +49,18 @@ async def get_recommended_events(
     joined_event_ids = joined_events_result.scalars().all()
 
     # Layer 1: Hard Filtering
+    now = datetime.now(timezone.utc)
     user_is_first_year = user.age and user.age <= 19 and user.yearOfStudy == 1
     
     filtered_events = []
     for event in events:
+        event_end = event.endTime if (event.endTime and event.endTime.tzinfo) else (event.endTime.replace(tzinfo=timezone.utc) if event.endTime else now)
+        is_ended = event_end <= now
+
+        # On the recommended tab: drop ended or inactive events so they don't sit on the page
+        if tab == "recommended" and (is_ended or event.status != "ACTIVE"):
+            continue
+
         if event.id in joined_event_ids or event.hostId == user.id:
             filtered_events.append(event)
             continue
@@ -209,6 +218,9 @@ async def get_recommended_events(
         participant_count = len(event.participants)
         dummy_avatars = [f"https://i.pravatar.cc/150?img={(i + 10) % 70}" for i in range(participant_count)]
         
+        event_end = event.endTime if (event.endTime and event.endTime.tzinfo) else (event.endTime.replace(tzinfo=timezone.utc) if event.endTime else now)
+        is_ended = event_end <= now
+
         final_events.append({
             "id": event.id,
             "title": event.title,
@@ -222,7 +234,8 @@ async def get_recommended_events(
             "rationale": rationale,
             "participants": dummy_avatars,
             "isJoined": is_joined,
-            "isHost": is_host
+            "isHost": is_host,
+            "isEnded": is_ended,
         })
 
     return {"events": final_events, "totalCount": total_count}
@@ -235,10 +248,11 @@ async def pregenerate_user_rationales(db: AsyncSession, user: User, limit: int =
     user_context = f"Age: {user.age}. Year of Study: {user.yearOfStudy}. University: {user.university}. Interests: {', '.join(user.interests or [])}. Languages: {', '.join(user.languages or [])}. Looking For: {', '.join(user.lookingForTags or [])}. Social Energy: {user.socialEnergyLevel} ({user.introvertExtrovertScore}/100). Bio: {user.bio}"
     user_profile_hash = hashlib.sha256(user_context.encode()).hexdigest()
 
+    now = datetime.now(timezone.utc)
     result = await db.execute(
         select(Event)
         .options(selectinload(Event.host), selectinload(Event.participants))
-        .where(Event.status == "ACTIVE")
+        .where(Event.status == "ACTIVE", Event.endTime > now)
         .order_by(Event.startTime)
     )
     events = result.scalars().all()
