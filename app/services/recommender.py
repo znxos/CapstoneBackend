@@ -73,11 +73,13 @@ async def get_recommended_events(
     )
     events = result.scalars().all()
 
-    # Get joined event IDs
+    # Get joined event IDs and joinedAt timestamps
     joined_events_result = await db.execute(
-        select(EventParticipant.eventId).where(EventParticipant.userId == user.id)
+        select(EventParticipant.eventId, EventParticipant.joinedAt).where(EventParticipant.userId == user.id)
     )
-    joined_event_ids = set(joined_events_result.scalars().all())
+    joined_participant_rows = joined_events_result.all()
+    joined_event_map = {row[0]: row[1] for row in joined_participant_rows}
+    joined_event_ids = set(joined_event_map.keys())
 
     # Layer 1: Tab-Aware Hard Filtering
     now = datetime.now(timezone.utc)
@@ -127,6 +129,18 @@ async def get_recommended_events(
 
     # If non-recommended tabs: Simple chronological list with fixed labels (0 AI calls)
     if tab != "recommended":
+        if tab == "my-events":
+            # Most recently joined events first
+            def get_joined_time(ev: Event):
+                t = joined_event_map.get(ev.id)
+                if not t:
+                    return datetime.min.replace(tzinfo=timezone.utc)
+                if t.tzinfo is None:
+                    return t.replace(tzinfo=timezone.utc)
+                return t
+
+            eligible_events.sort(key=get_joined_time, reverse=True)
+
         total_count = len(eligible_events)
         paginated_events = eligible_events[(page - 1) * limit : page * limit]
         
@@ -158,12 +172,12 @@ async def get_recommended_events(
                 "isHost": is_host,
                 "isEnded": is_ended,
             })
-        return {"events": final_events, "totalCount": total_count}
+        return {"events": final_events, "totalCount": total_count, "hasMoreMatches": False}
 
     # RECOMMENDED TAB: Two-Stage Retrieve & Re-Rank Engine
     total_count = len(eligible_events)
     if not eligible_events:
-        return {"events": [], "totalCount": 0}
+        return {"events": [], "totalCount": 0, "hasMoreMatches": False}
 
     # Stage 1: Vector Cosine Baseline Scoring for all eligible unjoined events
     scored_items: List[Dict[str, Any]] = []
@@ -313,7 +327,8 @@ async def get_recommended_events(
             "isEnded": is_ended,
         })
 
-    return {"events": final_events, "totalCount": total_count}
+    has_more = target_pool_size < len(scored_items)
+    return {"events": final_events, "totalCount": total_count, "hasMoreMatches": has_more}
 
 async def pregenerate_user_rationales(db: AsyncSession, user: User, limit: int = 12) -> int:
     """

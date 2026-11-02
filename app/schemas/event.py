@@ -30,3 +30,4 @@ class EventResponse(BaseModel):
 class EventListResponse(BaseModel):
     events: List[EventResponse]
     totalCount: int
+    hasMoreMatches: Optional[bool] = None
