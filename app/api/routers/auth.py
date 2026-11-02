@@ -46,7 +46,7 @@ async def signup(user_data: UserCreate, request: Request, db: AsyncSession = Dep
     
     # Generate Verification Token
     token_str = str(uuid.uuid4())
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=2)
     v_token = VerificationToken(
         email=user_data.studentEmail,
         token=token_str,
@@ -59,8 +59,8 @@ async def signup(user_data: UserCreate, request: Request, db: AsyncSession = Dep
     
     # Send email
     if settings.RESEND_API_KEY:
-        base_url = str(request.base_url).rstrip('/')
-        confirm_link = f"{base_url}/api/auth/verify?token={token_str}"
+        origin = request.headers.get("origin") or settings.FRONTEND_URL
+        confirm_link = f"{origin}/api/auth/verify?token={token_str}"
         async with httpx.AsyncClient() as client:
             await client.post(
                 "https://api.resend.com/emails",
@@ -72,14 +72,17 @@ async def signup(user_data: UserCreate, request: Request, db: AsyncSession = Dep
                     "html": f"""
                         <div style="font-family: sans-serif; max-w: 600px; margin: 0 auto;">
                           <h2>Welcome!</h2>
-                          <p>Please confirm your email address by clicking the link below. This link will expire in 24 hours.</p>
+                          <p>Please confirm your email address by clicking the link below. This link will expire in 2 hours.</p>
                           <div style="margin: 30px 0;">
                             <a href="{confirm_link}" style="background-color: #363636; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold;">
                               Verify Email Address
                             </a>
                           </div>
+                          <hr style="border: none; border-top: 1px solid #eaeaea; margin-top: 30px;" />
+                          <p style="color: #999; font-size: 12px;">Or copy and paste this link into your browser: <br/> {confirm_link}</p>
                         </div>
-                    """
+                    """,
+                    "text": f"Welcome!\n\nPlease confirm your email address by clicking the link below:\n{confirm_link}\n\nThis link will expire in 2 hours."
                 }
             )
             
@@ -109,7 +112,6 @@ async def verify_email(token: str, db: AsyncSession = Depends(get_db)):
         user.lastVerifiedAt = datetime.now(timezone.utc).replace(tzinfo=None)
         db.add(user)
         
-    await db.delete(v_token)
     await db.commit()
     
     return RedirectResponse(url=f"{settings.FRONTEND_URL}/login?verified=true")
@@ -125,21 +127,16 @@ async def resend_verification(req: ResendVerificationRequest, request: Request, 
     if not user or user.isVerified:
         return {"message": "If an unverified account with that email exists, we have resent the confirmation link."}
         
-    # Delete existing tokens
-    existing = await db.execute(select(VerificationToken).where(VerificationToken.email == req.email))
-    for t in existing.scalars().all():
-        await db.delete(t)
-        
-    # Generate new token
+    # Generate new token (tokens expire naturally via expiresAt)
     token_str = str(uuid.uuid4())
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=2)
     v_token = VerificationToken(email=req.email, token=token_str, expiresAt=expires_at)
     db.add(v_token)
     await db.commit()
     
     if settings.RESEND_API_KEY:
-        base_url = str(request.base_url).rstrip('/')
-        confirm_link = f"{base_url}/api/auth/verify?token={token_str}"
+        origin = request.headers.get("origin") or settings.FRONTEND_URL
+        confirm_link = f"{origin}/api/auth/verify?token={token_str}"
         async with httpx.AsyncClient() as client:
             await client.post(
                 "https://api.resend.com/emails",
@@ -148,7 +145,20 @@ async def resend_verification(req: ResendVerificationRequest, request: Request, 
                     "from": "Capestone Project <onboarding@invertaxis.com>",
                     "to": [req.email],
                     "subject": "Verify your email address",
-                    "html": f"<p>Please click this link to verify your email: <a href='{confirm_link}'>{confirm_link}</a></p>"
+                    "html": f"""
+                        <div style="font-family: sans-serif; max-w: 600px; margin: 0 auto;">
+                          <h2>Confirm your Email Address</h2>
+                          <p>Here is your new verification link. This link will expire in 2 hours.</p>
+                          <div style="margin: 30px 0;">
+                            <a href="{confirm_link}" style="background-color: #363636; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold;">
+                              Verify Email Address
+                            </a>
+                          </div>
+                          <hr style="border: none; border-top: 1px solid #eaeaea; margin-top: 30px;" />
+                          <p style="color: #999; font-size: 12px;">Or copy and paste this link into your browser: <br/> {confirm_link}</p>
+                        </div>
+                    """,
+                    "text": f"Confirm your Email Address\n\nPlease click this link to verify your email:\n{confirm_link}\n\nThis link will expire in 2 hours."
                 }
             )
             
@@ -166,6 +176,12 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSessi
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
+        )
+        
+    if not user.isVerified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Please verify your email address before logging in.",
         )
         
     access_token = create_access_token(subject=user.id)
