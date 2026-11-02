@@ -18,6 +18,7 @@ async def get_events(
     limit: int = Query(6, ge=1, le=50),
     tab: str = Query("recommended", pattern="^(recommended|my-events|created-events)$"),
     category: str = Query("All"),
+    generate_more: bool = Query(False),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -28,10 +29,12 @@ async def get_events(
             page=page,
             limit=limit,
             tab=tab,
-            category=category
+            category=category,
+            generate_more=generate_more
         )
     except Exception as e:
-        print(e)
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail="Failed to get events")
 
 @router.post("", status_code=status.HTTP_201_CREATED)

@@ -1,3 +1,4 @@
+from typing import Optional
 import uuid
 from datetime import datetime, timezone
 from sqlmodel import SQLModel, Field, Relationship
@@ -7,6 +8,7 @@ class EventRationaleBase(SQLModel):
     eventId: str = Field(foreign_key="Event.id", index=True)
     userId: str = Field(foreign_key="User.id", index=True)
     rationale: str
+    score: Optional[int] = Field(default=None, nullable=True)
     userProfileHash: str
     
     createdAt: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), sa_column=Column(DateTime(timezone=True), server_default=func.now()))
