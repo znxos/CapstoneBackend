@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from app.core.rate_limit import limiter
+from app.core.config import settings
 
 from contextlib import asynccontextmanager
 import asyncio
@@ -32,13 +33,23 @@ from app.api.routers import auth, recommend, chat
 from app.api.dependencies import verify_api_key
 from fastapi import Depends
 
-# Configure CORS for the frontend
+# Configure CORS for the frontend with strict origin restrictions
+allowed_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+if settings.FRONTEND_URL:
+    for domain in settings.FRONTEND_URL.split(","):
+        clean_domain = domain.strip().rstrip("/")
+        if clean_domain and clean_domain not in allowed_origins:
+            allowed_origins.append(clean_domain)
+
 app.add_middleware(
     CORSMiddleware,
-    # Use regex to allow all origins dynamically so that credentials work
-    allow_origin_regex=".*",
+    allow_origins=allowed_origins,
+    allow_origin_regex=r"^https://[a-zA-Z0-9_-]+\.vercel\.app$",
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 

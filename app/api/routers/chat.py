@@ -56,6 +56,15 @@ async def get_messages(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
+    # Check membership: host or participant
+    is_host = await db.execute(select(Event).where(Event.id == event_id, Event.hostId == current_user.id))
+    is_participant = await db.execute(
+        select(EventParticipant).where(EventParticipant.eventId == event_id, EventParticipant.userId == current_user.id)
+    )
+    
+    if not is_host.scalars().first() and not is_participant.scalars().first():
+        raise HTTPException(status_code=403, detail="You are not a participant of this event.")
+
     result = await db.execute(
         select(Message)
         .options(selectinload(Message.sender))
@@ -156,13 +165,29 @@ async def pusher_auth(
     request: Request,
     socket_id: str = Form(...),
     channel_name: str = Form(...),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
 ):
     if not pusher_client:
         raise HTTPException(status_code=500, detail="Pusher not configured")
         
     if not current_user:
         raise HTTPException(status_code=403, detail="Not authorized")
+        
+    # Extract event_id from channel_name (e.g. "private-encrypted-<event_id>" or "private-<event_id>")
+    event_id = channel_name
+    if channel_name.startswith("private-encrypted-"):
+        event_id = channel_name[len("private-encrypted-"):]
+    elif channel_name.startswith("private-"):
+        event_id = channel_name[len("private-"):]
+        
+    # Verify the user is either the host or a participant of the event
+    is_host = await db.execute(select(Event).where(Event.id == event_id, Event.hostId == current_user.id))
+    is_participant = await db.execute(
+        select(EventParticipant).where(EventParticipant.eventId == event_id, EventParticipant.userId == current_user.id)
+    )
+    if not is_host.scalars().first() and not is_participant.scalars().first():
+        raise HTTPException(status_code=403, detail="You are not authorized to subscribe to this channel.")
         
     auth = pusher_client.authenticate(
         channel=channel_name,

@@ -17,8 +17,29 @@ from app.services.recommender import pregenerate_user_rationales
 from pydantic import BaseModel, EmailStr
 import httpx
 from app.core.config import settings
+from app.core.rate_limit import limiter
+from urllib.parse import urlparse
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+def get_safe_origin(request: Request) -> str:
+    """Validates the origin header against trusted domains to prevent password reset / verification link poisoning."""
+    origin = request.headers.get("origin")
+    allowed_hosts = {"localhost:3000", "127.0.0.1:3000"}
+    if settings.FRONTEND_URL:
+        for f_url in settings.FRONTEND_URL.split(","):
+            frontend_netloc = urlparse(f_url.strip()).netloc.lower()
+            if frontend_netloc:
+                allowed_hosts.add(frontend_netloc)
+            
+    if origin:
+        parsed = urlparse(origin)
+        netloc = parsed.netloc.lower()
+        if netloc in allowed_hosts or (netloc.endswith(".vercel.app") and any("vercel" in f.lower() for f in settings.FRONTEND_URL.split(","))):
+            return origin.rstrip("/")
+            
+    primary_frontend = settings.FRONTEND_URL.split(",")[0].strip() if settings.FRONTEND_URL else "http://localhost:3000"
+    return primary_frontend.rstrip("/")
 
 async def _bg_pregenerate_user_rationales(user_id: str):
     try:
@@ -32,7 +53,8 @@ async def _bg_pregenerate_user_rationales(user_id: str):
 
 
 @router.post("/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def signup(user_data: UserCreate, request: Request, db: AsyncSession = Depends(get_db)):
+@limiter.limit("5/minute")
+async def signup(request: Request, user_data: UserCreate, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.studentEmail == user_data.studentEmail))
     if result.scalars().first():
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -59,7 +81,7 @@ async def signup(user_data: UserCreate, request: Request, db: AsyncSession = Dep
     
     # Send email
     if settings.RESEND_API_KEY:
-        origin = request.headers.get("origin") or settings.FRONTEND_URL
+        origin = get_safe_origin(request)
         confirm_link = f"{origin}/api/auth/verify?token={token_str}"
         async with httpx.AsyncClient() as client:
             await client.post(
@@ -120,6 +142,7 @@ class ResendVerificationRequest(BaseModel):
     email: EmailStr
 
 @router.post("/resend-verification")
+@limiter.limit("3/minute")
 async def resend_verification(req: ResendVerificationRequest, request: Request, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.studentEmail == req.email))
     user = result.scalars().first()
@@ -135,7 +158,7 @@ async def resend_verification(req: ResendVerificationRequest, request: Request, 
     await db.commit()
     
     if settings.RESEND_API_KEY:
-        origin = request.headers.get("origin") or settings.FRONTEND_URL
+        origin = get_safe_origin(request)
         confirm_link = f"{origin}/api/auth/verify?token={token_str}"
         async with httpx.AsyncClient() as client:
             await client.post(
@@ -167,7 +190,8 @@ async def resend_verification(req: ResendVerificationRequest, request: Request, 
 
 
 @router.post("/login", response_model=Token)
-async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
+@limiter.limit("10/minute")
+async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.studentEmail == form_data.username))
     user = result.scalars().first()
     
@@ -323,6 +347,7 @@ class PasswordResetConfirm(BaseModel):
     new_password: str
 
 @router.post("/reset-password-request")
+@limiter.limit("3/minute")
 async def reset_password_request(req: PasswordResetRequest, request: Request, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.studentEmail == req.email))
     user = result.scalars().first()
@@ -331,12 +356,9 @@ async def reset_password_request(req: PasswordResetRequest, request: Request, db
         # Prevent email enumeration by returning a generic success message
         return {"message": "If an account with that email exists, we have sent a reset link."}
         
-    token = create_password_reset_token(email=req.email)
+    token = create_password_reset_token(email=req.email, password_hash=user.passwordHash)
     
-    # Use the origin header to support Vercel preview deployments dynamically.
-    # Fallback to the environment variable if the origin header is missing.
-    origin = request.headers.get("origin") or settings.FRONTEND_URL
-
+    origin = get_safe_origin(request)
     reset_link = f"{origin}/reset-password?token={token}"
     
     if settings.RESEND_API_KEY:
@@ -370,7 +392,8 @@ async def reset_password_request(req: PasswordResetRequest, request: Request, db
     return {"message": "If an account with that email exists, we have sent a reset link.", "resend_status": "No API Key"}
 
 @router.post("/reset-password")
-async def reset_password(req: PasswordResetConfirm, db: AsyncSession = Depends(get_db)):
+@limiter.limit("5/minute")
+async def reset_password(req: PasswordResetConfirm, request: Request, db: AsyncSession = Depends(get_db)):
     email = verify_password_reset_token(req.token)
     if not email:
         raise HTTPException(status_code=400, detail="Invalid or expired reset token")
@@ -380,6 +403,9 @@ async def reset_password(req: PasswordResetConfirm, db: AsyncSession = Depends(g
     
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+        
+    if not verify_password_reset_token(req.token, current_password_hash=user.passwordHash):
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
         
     if verify_password(req.new_password, user.passwordHash):
         raise HTTPException(status_code=400, detail="Your new password must be different from your previously used one.")

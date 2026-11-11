@@ -36,14 +36,37 @@ async def get_current_user(
         raise credentials_exception
     return user
 
-from fastapi import Header
+from fastapi import Header, Request
 
-async def verify_api_key(x_api_key: str = Header(None)):
+async def verify_api_key(
+    request: Request,
+    x_api_key: str = Header(None),
+    authorization: str = Header(None)
+):
     if not settings.API_SECRET_KEY:
         # If no key is configured in the environment, skip the check (useful for local dev)
         return
-    if x_api_key != settings.API_SECRET_KEY:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid or missing X-API-Key header",
-        )
+    if x_api_key == settings.API_SECRET_KEY:
+        return
+    if authorization and authorization.startswith("Bearer "):
+        return
+        
+    public_paths = {
+        "/api/auth/login",
+        "/api/auth/signup",
+        "/api/auth/verify",
+        "/api/auth/resend-verification",
+        "/api/auth/reset-password-request",
+        "/api/auth/reset-password",
+        "/api/health",
+        "/docs",
+        "/redoc",
+        "/openapi.json"
+    }
+    if request.url.path in public_paths:
+        return
+        
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Invalid or missing X-API-Key header",
+    )
