@@ -97,14 +97,22 @@ async def get_recommended_events(
             # Exclude ended or inactive events
             if is_ended or event.status != "ACTIVE":
                 continue
-            # EXCLUDE joined and hosted events immediately so candidate slots are 100% unjoined
+            # EXCLUDE joined and hosted events immediately so event slots are 100% unjoined
             if is_joined or is_host:
                 continue
             # Campus boundaries
-            if user.university and event.host.university and user.university != event.host.university:
-                continue
-            # First-year ring-fencing
-            host_is_first_year = bool(event.host.age and event.host.age <= 19 and event.host.yearOfStudy == 1)
+            if user.university:
+                host_uni = (event.host.university or "").strip().upper() if event.host else ""
+                if host_uni != user.university.strip().upper():
+                    continue
+
+            # First-year restriction to help protect them, they may not join events hosted by individuals outside their year.
+            host_is_first_year = bool(
+                event.host 
+                and event.host.age 
+                and event.host.age <= 19 
+                and event.host.yearOfStudy == 1
+            )
             if user_is_first_year != host_is_first_year:
                 continue
             # Category filter
@@ -192,9 +200,9 @@ async def get_recommended_events(
         # Quick heuristic adjustment for baseline retrieval ranking
         if event.category.lower() in user_tags_str:
             baseline_score += 5
-        if user.socialEnergyLevel == event.host.socialEnergyLevel:
+        if event.host and user.socialEnergyLevel == event.host.socialEnergyLevel:
             baseline_score += 3
-        if user.yearOfStudy == event.host.yearOfStudy:
+        if event.host and user.yearOfStudy == event.host.yearOfStudy:
             baseline_score += 3
             
         baseline_score = min(max(baseline_score, 10), 99)

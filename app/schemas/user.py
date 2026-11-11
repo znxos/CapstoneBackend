@@ -42,6 +42,7 @@ class UserResponse(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str
+    isFirstLogin: Optional[bool] = None
 
 class UserProfileUpdate(BaseModel):
     displayName: Optional[str] = None

@@ -3,7 +3,7 @@ from typing import Dict, List
 
 class AILimiter:
     """
-    A simple in-memory rate limiter to prevent LLM API quota exhaustion.
+    An in-memory rate limiter to prevent the system from hitting the API quota.
     """
     def __init__(self, limit: int, time_window_seconds: int = 60):
         self.limit = limit
