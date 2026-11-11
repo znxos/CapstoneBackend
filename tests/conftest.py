@@ -39,9 +39,11 @@ async def override_get_db():
     async with TestingSessionLocal() as session:
         yield session
 
-app.dependency_overrides[get_db] = override_get_db
+from app.api.dependencies import get_db as dep_get_db, verify_api_key
 
-from app.api.dependencies import verify_api_key
+app.dependency_overrides[get_db] = override_get_db
+app.dependency_overrides[dep_get_db] = override_get_db
+
 async def override_verify_api_key():
     return
 app.dependency_overrides[verify_api_key] = override_verify_api_key

@@ -15,7 +15,8 @@ async def test_tc005_ai_bio_extraction():
     mock_result = MagicMock()
     mock_result.text = '["Fitness", "Evening Availability"]'
     
-    with patch("asyncio.to_thread", return_value=mock_result):
+    with patch("asyncio.to_thread", return_value=mock_result), \
+         patch("app.services.llm_service.events_limiter.can_request", return_value=True):
         tags = await extract_tags_from_bio("I love lifting weights after class")
         assert tags == ["FITNESS", "EVENING AVAILABILITY"]
 

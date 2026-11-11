@@ -4,7 +4,7 @@ from sqlmodel import select
 from app.models.user import User
 from app.models.event import Event, EventParticipant
 from tests.conftest import TestingSessionLocal
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import uuid
 
 @pytest.mark.asyncio
@@ -22,7 +22,7 @@ async def test_tc004_event_capacity_limit(async_client: AsyncClient, setup_db):
             category="Tech",
             description="A test event",
             startTime=datetime.now(timezone.utc),
-            endTime=datetime.now(timezone.utc),
+            endTime=datetime.now(timezone.utc) + timedelta(hours=2),
             location="Room A",
             maxParticipants=3,
             hostId=str(uuid.uuid4()),
@@ -50,7 +50,6 @@ async def test_tc004_event_capacity_limit(async_client: AsyncClient, setup_db):
     # We need to mock authentication to act as joining_user
     # We can use the create_access_token from security
     from app.core.security import create_access_token
-    from datetime import timedelta
     access_token = create_access_token(
         subject=str(joining_user.id),
         expires_delta=timedelta(minutes=15)
