@@ -18,28 +18,63 @@ from pydantic import BaseModel, EmailStr
 import httpx
 from app.core.config import settings
 from app.core.rate_limit import limiter
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+def is_allowed_frontend_origin(origin: str) -> bool:
+    try:
+        parsed = urlparse(origin)
+    except ValueError:
+        return False
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.username
+        or parsed.password
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+    ):
+        return False
+
+    netloc = parsed.netloc.lower()
+    if parsed.scheme == "http" and netloc in {"localhost:3000", "127.0.0.1:3000"}:
+        return True
+
+    configured_origins = [
+        value.strip().rstrip("/")
+        for value in (settings.FRONTEND_URL or "").split(",")
+        if value.strip()
+    ]
+    for configured_origin in configured_origins:
+        configured = urlparse(configured_origin)
+        if parsed.scheme == configured.scheme and netloc == configured.netloc.lower():
+            return True
+
+    return netloc.endswith(".vercel.app") and any(
+        "vercel" in configured_origin.lower()
+        for configured_origin in configured_origins
+    )
+
+
+def get_primary_frontend_origin() -> str:
+    configured_origin = settings.FRONTEND_URL.split(",")[0].strip() if settings.FRONTEND_URL else ""
+    return (configured_origin or "http://localhost:3000").rstrip("/")
+
 
 def get_safe_origin(request: Request) -> str:
     """Validates the origin header against trusted domains to prevent password reset / verification link poisoning."""
     origin = request.headers.get("origin")
-    allowed_hosts = {"localhost:3000", "127.0.0.1:3000"}
-    if settings.FRONTEND_URL:
-        for f_url in settings.FRONTEND_URL.split(","):
-            frontend_netloc = urlparse(f_url.strip()).netloc.lower()
-            if frontend_netloc:
-                allowed_hosts.add(frontend_netloc)
-            
-    if origin:
-        parsed = urlparse(origin)
-        netloc = parsed.netloc.lower()
-        if netloc in allowed_hosts or (netloc.endswith(".vercel.app") and any("vercel" in f.lower() for f in settings.FRONTEND_URL.split(","))):
-            return origin.rstrip("/")
-            
-    primary_frontend = settings.FRONTEND_URL.split(",")[0].strip() if settings.FRONTEND_URL else "http://localhost:3000"
-    return primary_frontend.rstrip("/")
+    if origin and is_allowed_frontend_origin(origin):
+        return origin.rstrip("/")
+    return get_primary_frontend_origin()
+
+
+def build_verification_link(origin: str, token: str) -> str:
+    query = urlencode({"token": token, "frontend_origin": origin})
+    return f"{origin}/api/auth/verify?{query}"
+
 
 async def _bg_pregenerate_user_rationales(user_id: str):
     try:
@@ -50,6 +85,27 @@ async def _bg_pregenerate_user_rationales(user_id: str):
                 await pregenerate_user_rationales(session, user)
     except Exception as e:
         print(f"Error in background rationale pregeneration for user {user_id}: {e}")
+
+async def _bg_generate_user_embedding(user_id: str):
+    try:
+        async with async_session() as session:
+            result = await session.execute(select(User).where(User.id == user_id))
+            user = result.scalars().first()
+            if not user:
+                return
+
+            embedding = await generate_user_embedding({
+                "bio": user.bio,
+                "interests": user.interests or [],
+                "lookingForTags": user.lookingForTags or [],
+                "extractedAiTags": user.extractedAiTags or [],
+                "languages": user.languages or []
+            })
+            if embedding:
+                user.cachedVectorEmbedding = embedding
+                await session.commit()
+    except Exception as e:
+        print(f"Error generating user embedding in background for user {user_id}: {e}")
 
 
 @router.post("/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -82,7 +138,7 @@ async def signup(request: Request, user_data: UserCreate, db: AsyncSession = Dep
     # Send email
     if settings.RESEND_API_KEY:
         origin = get_safe_origin(request)
-        confirm_link = f"{origin}/api/auth/verify?token={token_str}"
+        confirm_link = build_verification_link(origin, token_str)
         async with httpx.AsyncClient() as client:
             await client.post(
                 "https://api.resend.com/emails",
@@ -111,7 +167,11 @@ async def signup(request: Request, user_data: UserCreate, db: AsyncSession = Dep
     return new_user
 
 @router.get("/verify")
-async def verify_email(token: str, db: AsyncSession = Depends(get_db)):
+async def verify_email(
+    token: str,
+    frontend_origin: str | None = None,
+    db: AsyncSession = Depends(get_db)
+):
     result = await db.execute(select(VerificationToken).where(VerificationToken.token == token))
     v_token = result.scalars().first()
     
@@ -136,7 +196,12 @@ async def verify_email(token: str, db: AsyncSession = Depends(get_db)):
         
     await db.commit()
     
-    return RedirectResponse(url=f"{settings.FRONTEND_URL}/login?verified=true")
+    redirect_origin = (
+        frontend_origin
+        if frontend_origin and is_allowed_frontend_origin(frontend_origin)
+        else get_primary_frontend_origin()
+    )
+    return RedirectResponse(url=f"{redirect_origin}/login?verified=true")
 
 class ResendVerificationRequest(BaseModel):
     email: EmailStr
@@ -159,7 +224,7 @@ async def resend_verification(req: ResendVerificationRequest, request: Request, 
     
     if settings.RESEND_API_KEY:
         origin = get_safe_origin(request)
-        confirm_link = f"{origin}/api/auth/verify?token={token_str}"
+        confirm_link = build_verification_link(origin, token_str)
         async with httpx.AsyncClient() as client:
             await client.post(
                 "https://api.resend.com/emails",
@@ -251,21 +316,10 @@ async def onboard_user(
         except Exception as e:
             print(f"Error extracting tags in onboarding: {e}")
     
-    try:
-        new_embedding = await generate_user_embedding({
-            "bio": current_user.bio,
-            "interests": current_user.interests,
-            "lookingForTags": current_user.lookingForTags,
-            "languages": current_user.languages
-        })
-        if new_embedding:
-            current_user.cachedVectorEmbedding = new_embedding
-    except Exception as e:
-        print(f"Error generating initial user vector embedding: {e}")
-
     db.add(current_user)
     await db.commit()
 
+    background_tasks.add_task(_bg_generate_user_embedding, current_user.id)
     background_tasks.add_task(_bg_pregenerate_user_rationales, current_user.id)
     
     return {"success": True}

@@ -11,3 +11,5 @@ services:
         generateValue: true
       - key: GEMINI_API_KEY
         sync: false
+      - key: FRONTEND_URL
+        sync: false

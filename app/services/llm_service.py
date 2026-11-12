@@ -17,6 +17,12 @@ RECOMMENDATION_MODELS = [
     "gemini-3.8-flash"
 ]
 
+TAG_EXTRACTION_MODELS = [
+    "gemini-3.5-flash-lite",
+    "gemini-3.6-flash",
+    "gemini-3.8-flash"
+]
+
 def compute_cosine_similarity(vec_a: List[float], vec_b: List[float]) -> float:
     if not vec_a or not vec_b:
         return 0.0
@@ -53,7 +59,8 @@ async def generate_user_embedding(user_data: Dict[str, Any]) -> List[float]:
     
     try:
         genai.configure(api_key=random.choice(api_keys))
-        result = genai.embed_content(
+        result = await asyncio.to_thread(
+            genai.embed_content,
             model="models/gemini-embedding-001",
             content=text_to_embed,
             task_type="retrieval_document"
@@ -219,20 +226,21 @@ async def extract_tags_from_bio(bio: str, max_attempts: int = 5) -> List[str]:
     Bio: "{bio}"
     """
     
-    total_combinations = len(RECOMMENDATION_MODELS) * len(api_keys)
-    attempt_index = random.randint(0, max(0, total_combinations - 1))
+    total_combinations = len(TAG_EXTRACTION_MODELS) * len(api_keys)
+    attempt_index = 0
     
     for i in range(max_attempts):
         if not events_limiter.can_request():
             print("Events limiter rate limited (tag extraction retry loop).")
             break
             
-        model_index = attempt_index % len(RECOMMENDATION_MODELS)
-        key_index = (attempt_index // len(RECOMMENDATION_MODELS)) % len(api_keys)
+        model_index = (attempt_index // len(api_keys)) % len(TAG_EXTRACTION_MODELS)
+        key_index = attempt_index % len(api_keys)
+        model_name = TAG_EXTRACTION_MODELS[model_index]
         
         try:
             genai.configure(api_key=api_keys[key_index])
-            model = genai.GenerativeModel(RECOMMENDATION_MODELS[model_index])
+            model = genai.GenerativeModel(model_name)
             
             result = await asyncio.to_thread(
                 model.generate_content,
@@ -254,7 +262,7 @@ async def extract_tags_from_bio(bio: str, max_attempts: int = 5) -> List[str]:
                 return [str(t).upper() for t in tags[:5]]
                 
         except Exception as e:
-            print(f"[Attempt {i + 1}/{max_attempts}] Model {RECOMMENDATION_MODELS[model_index]} failed: {e}")
+            print(f"[Attempt {i + 1}/{max_attempts}] Model {model_name} failed: {e}")
             
         attempt_index = (attempt_index + 1) % total_combinations
         await asyncio.sleep(0.5)

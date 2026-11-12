@@ -217,8 +217,8 @@ async def get_recommended_events(
     # Sort all eligible items by baseline similarity
     scored_items.sort(key=lambda x: x["baseline_score"], reverse=True)
 
-    # Default is 12 candidates (covers Pages 1 & 2). If generate_more requested on last page, expands by another 12.
-    target_pool_size = (page * limit) + 12 if generate_more else max(page * limit, 12)
+    # Keep the initial feed to two pages; only expose additional candidates after an explicit request.
+    target_pool_size = (page * limit) + 12 if generate_more else 12
     target_pool_size = min(target_pool_size, len(scored_items))
     
     candidates_to_rerank = scored_items[:target_pool_size]
@@ -295,12 +295,7 @@ async def get_recommended_events(
     # Re-sort the AI-evaluated candidate pool by AI score
     candidates_to_rerank.sort(key=lambda x: x["score"], reverse=True)
 
-    # Re-assemble the full list: AI-reranked pool first, followed by remaining baseline vector items
-    for item in scored_items[target_pool_size:]:
-        if "rationale" not in item:
-            item["rationale"] = f"Recommended based on topic alignment with {item['event'].category}."
-
-    final_ordered_items = candidates_to_rerank + scored_items[target_pool_size:]
+    final_ordered_items = candidates_to_rerank
 
     # Apply pagination
     paginated_items = final_ordered_items[(page - 1) * limit : page * limit]
@@ -336,7 +331,7 @@ async def get_recommended_events(
         })
 
     has_more = target_pool_size < len(scored_items)
-    return {"events": final_events, "totalCount": total_count, "hasMoreMatches": has_more}
+    return {"events": final_events, "totalCount": target_pool_size, "hasMoreMatches": has_more}
 
 async def pregenerate_user_rationales(db: AsyncSession, user: User, limit: int = 12) -> int:
     """
