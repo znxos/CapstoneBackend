@@ -46,7 +46,8 @@ async def get_recommended_events(
     limit: int = 6, 
     tab: str = "recommended", 
     category: str = "All",
-    generate_more: bool = False
+    generate_more: bool = False,
+    pool_size: int | None = None
 ):
     # Ensure user has vector embeddings
     if tab == "recommended" and not user.cachedVectorEmbedding:
@@ -217,8 +218,9 @@ async def get_recommended_events(
     # Sort all eligible items by baseline similarity
     scored_items.sort(key=lambda x: x["baseline_score"], reverse=True)
 
-    # Keep the initial feed to two pages; only expose additional candidates after an explicit request.
-    target_pool_size = (page * limit) + 12 if generate_more else 12
+    # Keep the initial feed to two pages; expand by one batch only when explicitly requested.
+    current_pool_size = pool_size if pool_size is not None else (max(page * limit, 12) if generate_more else 12)
+    target_pool_size = current_pool_size + 12 if generate_more else max(current_pool_size, 12)
     target_pool_size = min(target_pool_size, len(scored_items))
     
     candidates_to_rerank = scored_items[:target_pool_size]

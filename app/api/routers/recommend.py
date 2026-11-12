@@ -20,6 +20,7 @@ async def get_events(
     tab: str = Query("recommended", pattern="^(recommended|my-events|created-events)$"),
     category: str = Query("All"),
     generate_more: bool = Query(False),
+    pool_size: int | None = Query(None, ge=1),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -31,7 +32,8 @@ async def get_events(
             limit=limit,
             tab=tab,
             category=category,
-            generate_more=generate_more
+            generate_more=generate_more,
+            pool_size=pool_size
         )
     except Exception as e:
         import traceback
