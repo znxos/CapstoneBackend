@@ -47,7 +47,8 @@ async def get_recommended_events(
     tab: str = "recommended", 
     category: str = "All",
     generate_more: bool = False,
-    pool_size: int | None = None
+    pool_size: int | None = None,
+    full_pool: bool = False
 ):
     # Ensure user has vector embeddings
     if tab == "recommended" and not user.cachedVectorEmbedding:
@@ -300,7 +301,11 @@ async def get_recommended_events(
     final_ordered_items = candidates_to_rerank
 
     # Apply pagination
-    paginated_items = final_ordered_items[(page - 1) * limit : page * limit]
+    paginated_items = (
+        final_ordered_items
+        if full_pool
+        else final_ordered_items[(page - 1) * limit : page * limit]
+    )
 
     # Format output
     final_events = []

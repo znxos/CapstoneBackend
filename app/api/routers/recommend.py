@@ -21,6 +21,7 @@ async def get_events(
     category: str = Query("All"),
     generate_more: bool = Query(False),
     pool_size: int | None = Query(None, ge=1),
+    full_pool: bool = Query(False),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -33,7 +34,8 @@ async def get_events(
             tab=tab,
             category=category,
             generate_more=generate_more,
-            pool_size=pool_size
+            pool_size=pool_size,
+            full_pool=full_pool
         )
     except Exception as e:
         import traceback
